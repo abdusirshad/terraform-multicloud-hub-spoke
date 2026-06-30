@@ -1,0 +1,19 @@
+# Azure Blob Storage remote state backend.
+#
+# Rename this file to `backend-azure.tf` (drop the .example) to enable it, then run:
+#
+#   terraform init \
+#     -backend-config="resource_group_name=rg-tfstate" \
+#     -backend-config="storage_account_name=sttfstatehubspoke" \
+#     -backend-config="container_name=tfstate" \
+#     -backend-config="key=dev/hub-spoke.tfstate"
+#
+# Authenticate with `az login` (or ARM_* environment variables) before init.
+# Do NOT commit access keys — use AAD/MSI auth (use_azuread_auth) or env vars.
+
+# terraform {
+#   backend "azurerm" {
+#     use_azuread_auth = true
+#     # All other values are supplied via -backend-config at init time.
+#   }
+# }

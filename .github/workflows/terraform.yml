@@ -1,0 +1,64 @@
+name: terraform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.9.8"
+
+jobs:
+  validate:
+    name: fmt / validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform fmt (check, recursive)
+        run: terraform fmt -check -recursive
+
+      - name: Validate every module and the dev example
+        shell: bash
+        run: |
+          set -euo pipefail
+          # terraform validate must run inside an initialised directory. Init each
+          # leaf module and the example root with -backend=false (no cloud creds needed).
+          dirs="modules/azure-vnet modules/azure-aks modules/aws-vpc modules/azure-bastion examples/dev"
+          for d in $dirs; do
+            echo "::group::validate $d"
+            terraform -chdir="$d" init -backend=false -input=false -no-color
+            terraform -chdir="$d" validate -no-color
+            echo "::endgroup::"
+          done
+
+  tflint:
+    name: tflint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.53.0
+
+      - name: Init TFLint plugins
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run TFLint (recursive)
+        run: tflint --recursive --no-color

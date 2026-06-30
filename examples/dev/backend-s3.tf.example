@@ -1,0 +1,22 @@
+# AWS S3 + DynamoDB remote state backend (locking via DynamoDB).
+#
+# Rename this file to `backend-s3.tf` (drop the .example) to enable it, then run:
+#
+#   terraform init \
+#     -backend-config="bucket=tfstate-hub-spoke-<account-id>" \
+#     -backend-config="key=dev/hub-spoke.tfstate" \
+#     -backend-config="region=us-east-1" \
+#     -backend-config="dynamodb_table=tf-state-lock"
+#
+# Authenticate via the standard AWS credential chain (env vars, SSO, or instance role).
+# Enable bucket versioning + SSE; never commit credentials.
+#
+# NOTE: A configuration may declare only ONE backend. If you enable this file,
+# keep backend-azure.tf disabled (and vice versa).
+
+# terraform {
+#   backend "s3" {
+#     encrypt = true
+#     # All other values are supplied via -backend-config at init time.
+#   }
+# }

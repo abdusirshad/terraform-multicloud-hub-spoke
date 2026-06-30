@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars and fill in real values. terraform.tfvars is gitignored.
+
+# --- Azure ---
+azure_subscription_id = "00000000-0000-0000-0000-000000000000"
+azure_tenant_id       = "11111111-1111-1111-1111-111111111111"
+azure_location        = "uaenorth"
+
+# --- AWS ---
+aws_region = "us-east-1"
+aws_azs    = ["us-east-1a", "us-east-1b"]
+
+# --- Naming / sizing ---
+name_prefix        = "dev"
+kubernetes_version = "1.30"
+
+# Lock the AKS public API server to your office / VPN egress CIDRs.
+# Leave empty ([]) to disable the allow-list (not recommended for prod).
+api_server_authorized_ip_ranges = ["203.0.113.0/24"]
+
+tags = {
+  environment = "dev"
+  project     = "multicloud-hub-spoke"
+  managed_by  = "terraform"
+  owner       = "md-irshad"
+}
