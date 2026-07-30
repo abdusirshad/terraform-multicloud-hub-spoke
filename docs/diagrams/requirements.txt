@@ -1,0 +1,4 @@
+# Diagrams-as-code for the multi-cloud hub-spoke portfolio.
+# Requires the Graphviz "dot" binary on PATH (conda install -c conda-forge graphviz,
+# or `apt-get install graphviz`, or `brew install graphviz`).
+diagrams==0.24.1

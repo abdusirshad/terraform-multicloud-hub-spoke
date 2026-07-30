@@ -17,6 +17,47 @@ Author: **Md Irshad — Senior Cloud & AI Platform Engineer**
 
 ## Architecture
 
+![Multi-cloud hub-and-spoke architecture](docs/diagrams/architecture.png)
+
+Azure **Hub VNet `10.0.0.0/16`** (Azure Bastion + shared-services subnet) is
+peered **bidirectionally** to the Azure **Spoke VNet `10.1.0.0/16`** running an
+AKS cluster (system / ai-GPU / app node pools) with an ACR for zero-credential
+image pulls. A separate, independent **AWS VPC `10.20.0.0/16`** (public/private
+subnets, IGW, single NAT gateway, EKS-ready tags) is provisioned from the same
+root plan — no cross-cloud VPN (out of scope).
+
+```mermaid
+flowchart TB
+  subgraph AZ["Azure"]
+    subgraph HUB["Hub VNet · 10.0.0.0/16"]
+      BAS["Azure Bastion<br/>AzureBastionSubnet 10.0.0.0/27"]
+      SS["shared-services 10.0.1.0/24<br/>(KeyVault svc endpoint)"]
+    end
+    subgraph SPOKE["Spoke VNet · 10.1.0.0/16"]
+      subgraph AKS["AKS cluster (kubenet)"]
+        SYS["system pool · aks-system 10.1.0.0/22"]
+        AI["ai / GPU pool · aks-ai 10.1.4.0/22"]
+        APP["app pool · aks-app 10.1.8.0/22"]
+      end
+      ACR["ACR — AcrPull via kubelet MSI"]
+    end
+    HUB <== "VNet peering (bidirectional)" ==> SPOKE
+    ACR -. "pull images" .-> AKS
+  end
+  subgraph AWS["AWS — independent spoke"]
+    subgraph VPC["VPC · 10.20.0.0/16"]
+      IGW["Internet Gateway"] --> PUB["public 10.20.0.0/24, 10.20.1.0/24"]
+      PUB --> NAT["single NAT gateway"] --> PRIV["private 10.20.10.0/24, 10.20.11.0/24"]
+    end
+  end
+```
+
+> Deep dive with all Mermaid diagrams and a per-module reference:
+> [`docs/architecture.md`](docs/architecture.md).
+
+<details>
+<summary>ASCII fallback</summary>
+
 ```
                           ┌─────────────────────────────────────┐
                           │       Azure Hub VNet (10.0.0.0/16)   │
@@ -39,9 +80,15 @@ Author: **Md Irshad — Senior Cloud & AI Platform Engineer**
    └────────────────────────────────┘         └───────────────────────────────┘
 ```
 
-The hub and the AKS spoke are peered bidirectionally. The AWS VPC is an
-independent spoke provisioned from the same root for a single multi-cloud plan;
-cross-cloud connectivity (VPN/peering) is intentionally left out of scope here.
+</details>
+
+### Network topology / CIDR map
+
+| Cloud | Network | CIDR | Subnet(s) | Purpose |
+|-------|---------|------|-----------|---------|
+| Azure | Hub VNet | `10.0.0.0/16` | `AzureBastionSubnet` `10.0.0.0/27`, `shared-services` `10.0.1.0/24` | Bastion + KeyVault svc endpoint |
+| Azure | Spoke VNet | `10.1.0.0/16` | `aks-system` `10.1.0.0/22`, `aks-ai` `10.1.4.0/22`, `aks-app` `10.1.8.0/22` | AKS node-pool subnets (0/1/2) |
+| AWS | VPC | `10.20.0.0/16` | public `10.20.0.0/24`,`10.20.1.0/24`; private `10.20.10.0/24`,`10.20.11.0/24` | IGW-routed / NAT-routed, EKS-ready |
 
 ---
 
@@ -102,6 +149,48 @@ Each module ships its own `README.md` with the full input/output reference.
   `kubernetes.io/role/internal-elb` so the VPC drops straight into an EKS install.
 - **Reserved-subnet safety** — `AzureBastionSubnet` / `GatewaySubnet` are excluded
   from the workload-NSG association (Azure rejects restrictive NSGs there).
+
+---
+
+## Module dependency graph
+
+How the `examples/dev` root wires the four modules together (from
+[`examples/dev/main.tf`](examples/dev/main.tf)):
+
+```mermaid
+flowchart LR
+  ROOT["examples/dev (root)"]
+  ROOT --> HUBV["module.hub_vnet<br/>(azure-vnet)"]
+  ROOT --> SPOKEV["module.spoke_vnet<br/>(azure-vnet)"]
+  ROOT --> BAST["module.bastion<br/>(azure-bastion)"]
+  ROOT --> AKSM["module.aks<br/>(azure-aks)"]
+  ROOT --> VPCM["module.aws_vpc<br/>(aws-vpc)"]
+  ROOT --> ACR["azurerm_container_registry.acr"]
+  BAST -. "hub AzureBastionSubnet" .-> HUBV
+  AKSM -. "spoke aks-* subnets" .-> SPOKEV
+  AKSM -. "acr_id" .-> ACR
+  HUBV <== "peering" ==> SPOKEV
+```
+
+Bastion depends on the hub `AzureBastionSubnet`; AKS depends on the three spoke
+`aks-*` subnets and the ACR id. A live `terraform graph` render is available at
+[`docs/diagrams/tf-graph.png`](docs/diagrams/tf-graph.png) (`make graph`).
+
+---
+
+## CI/CD workflow
+
+![Terraform delivery workflow](docs/diagrams/workflow.png)
+
+```mermaid
+flowchart LR
+  DEV["Dev (VSCode)"] --> PUSH["git push · PR to main"]
+  PUSH --> FMT["fmt -check -recursive"]
+  FMT --> VAL["init -backend=false + validate"]
+  VAL --> LINT["tflint --recursive"]
+  LINT --> PLAN["plan / apply (manual, credentialed)"]
+  PLAN -. "remote state" .-> STATE["Azure Blob — or — S3 + DynamoDB"]
+```
 
 ---
 
@@ -214,6 +303,34 @@ cloud credentials, and is authored to pass on a public fork.
 | State & secrets | State files, `*.tfvars`, `*.pem/.key`, `.env` excluded via `.gitignore`; backends configured out-of-band |
 
 No secrets are committed — `terraform.tfvars.example` ships placeholders only.
+
+---
+
+## What this demonstrates
+
+- **Hub-and-spoke** network segmentation with bidirectional VNet peering.
+- **Multi-cloud** delivery (Azure + AWS) from a single Terraform root.
+- **Reusable, map-driven modules** — subnets/node pools change via map inputs, not module edits.
+- **MSI / ACR RBAC** — two user-assigned identities; `AcrPull` for zero-credential image pulls.
+- **Remote state** — Azure Blob or S3 + DynamoDB backend templates.
+- **Policy as code** — `tflint` (azurerm + aws rulesets) enforced in CI.
+
+---
+
+## Diagrams
+
+The diagrams above are generated as code with the
+[`diagrams`](https://diagrams.mingrammer.com/) (mingrammer) library and Graphviz.
+
+```bash
+make diagrams   # -> docs/diagrams/architecture.png + workflow.png (Python + Graphviz)
+make graph      # -> docs/diagrams/tf-graph.png (terraform init + Graphviz)
+```
+
+Source: [`docs/diagrams/architecture.py`](docs/diagrams/architecture.py),
+[`docs/diagrams/workflow.py`](docs/diagrams/workflow.py). Mermaid versions
+(rendered inline by GitHub) live in this README and
+[`docs/architecture.md`](docs/architecture.md).
 
 ---
 
